@@ -1,0 +1,6 @@
+{
+    "MLFLOW_ADMIN_USERNAME": "admin", 
+    "MLFLOW_ADMIN_PASSWORD": "password", 
+    "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=fsaieurekadevaccv1;AccountKey=CzoIK4m2peX3n/TPMIvkjWN5rN0H4vuHrLaL1gWEFJH3TpGXwPE0MlDnxpOUYE22id+Uwo6zpqAD+AStJvMxSg==;EndpointSuffix=core.windows.net", 
+    "AZURE_CONTAINER": "fasi-eureka-dev-cluster-mlflow" 
+}
