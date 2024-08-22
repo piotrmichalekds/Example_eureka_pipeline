@@ -1,9 +1,32 @@
-from eurekaai.components.steps import step, Output
+import os
+import argparse
+import time
+
+from eurekaai.config import client
+from eurekaai.components.steps import step
 from eurekaai.components.pipelines import pipeline
+from pipelineConfig import pipelineBaseParams
+from eurekaai.config.container import ContainerSetting
+from eurekaai.config.SparkSettings import SparkSettings
+from eurekaai.config.kubeflow import KubeflowSettings
+from eurekaai.components.steps import step, Output
+from eurekaai.sdk.epm_pipelines import PipelineLibrary
+
+container_settings = ContainerSetting(parent_image="crescendoimages.azurecr.io/eureka_dml_pipeline_perf:v4.8.2atul101",
+                                      requirements=["kfp ==1.8.16", "pyarrow",
+                                                    "typing_extensions==4.7.1",
+                                                    "pydantic==1.10.12", "pyiceberg==0.4.0"])
+
+USERNAME = os.environ.get('USERNAME')  # 'piotr.michalek@symphonyai.com'  # This is the user namespace for the profile you want to use
+NAMESPACE = os.environ.get('NAMESPACE')  # This is the username for the profile you want to use
+key='MTcyMzEwNTY1MHxOd3dBTkVOU00xVTFTbFpaUVVVMFFWUlFOek5QVGs5Rk5FaFBVVlpZUjA5R1NVMDFVak5FUVVZMFJEUlRRVXhaUWpaUlFsbzBURUU9fCiLKV33Cu-y-oyNo0cxQ_18ufgWGvOtIViwEI4eBHcP'
+
+kubeflow_setting = KubeflowSettings(username=USERNAME, key=key, namespace=NAMESPACE, synchronous=True)
+
+
 import pandas as pd
 
-
-@step(enable_cache=False)
+@step
 def generate_data() -> Output(
     df=pd.DataFrame,
     x_train=pd.DataFrame,
@@ -17,8 +40,18 @@ def generate_data() -> Output(
     from datetime import datetime, timedelta
     from sklearn.datasets import make_classification
     from sklearn.model_selection import train_test_split
+    
+    GEN = 'gen2'
+    SOURCE_UNIT = 'suncorp'
+    CFG_PATH = f"configs/{GEN}/{SOURCE_UNIT}"
+    FEAT = 'united'
+    FEAT_DIV = ''  # values=('', '_all', '_nrm', '_qnt')
         
     selected_feats = [f"feature_{i}" for i in range(60)]
+    # selected_feats_path = f'features/{GEN}/{FEAT}_selected_feats{FEAT_DIV}.txt'  # load selected universal features
+    # selected_feats_file = open(selected_feats_path, "r")
+    # selected_feats = selected_feats_file.read().split("\n")
+    
     # Parameters for make_classification
     n_samples = 1000
     n_features = len(selected_feats)
@@ -47,6 +80,8 @@ def generate_data() -> Output(
     # Create the final DataFrame
     df_meta = pd.DataFrame(meta_data)
     df = pd.concat([df_meta, df_features, df_labels], axis=1)
+    
+    # df = pd.read_csv('synthetic_classification_data.csv')  # load dataset
 
     df = df.replace(np.inf, 1e33)
     df = df.replace(-np.inf, -1e33).fillna(0)
@@ -57,7 +92,7 @@ def generate_data() -> Output(
     print(x_train.shape, x_test.shape, y_train.shape, y_test.shape)
     return df, x_train, x_test, y_train, y_test
 
-@step(enable_cache=False)
+@step
 def lf_extraction(df:pd.DataFrame,
     x_train:pd.DataFrame,
     x_test:pd.DataFrame,
@@ -72,7 +107,8 @@ def lf_extraction(df:pd.DataFrame,
     from senpy.utils.misc import get_logger
     
     #set admin creds
-    with open('env_config.json', 'r') as f: env_config = json.load(f)
+    with open('env_config.json', 'r') as f: 
+        env_config = json.load(f)
 
     os.environ['MLFLOW_ADMIN_USERNAME'] = env_config['MLFLOW_ADMIN_USERNAME'] 
     os.environ['MLFLOW_ADMIN_PASSWORD'] = env_config['MLFLOW_ADMIN_PASSWORD'] 
@@ -97,42 +133,48 @@ def lf_extraction(df:pd.DataFrame,
     FEAT = 'united'
     FEAT_DIV = ''  # values=('', '_all', '_nrm', '_qnt')
     
-    config = {"group": "null",
-    "filename": "suncorp_numleaves_1024",
-    "folder": "export/gen2/suncorp",
-    "stamp": True,
-    "pre_filter": {"min_0_samples_class_0": 1,
-                "max_1_samples_class_0": 10000,
-                "min_1_samples_class_1": 1,
-                "max_0_samples_class_1": 10000,
-                "acc_class_0": 0.4,
-                "acc_class_1": 0.4,
-                "max_rules_class_0": 10000,
-                "max_rules_class_1": 10000
-               },
-    "class_0": {"acc_threshold": 0.7,
-             "max_incorrect": 1000,
-             "overlap_limit": 95,
-             "rules_to_cover": 3,
-             "data_coverage": 99,
-             "rules_limit": 1000,
-             "penalty_factor": 2,
-             "weight_gini_impurity": 0.4,
-             "weight_split_ratio": 0.2,
-             "weight_adjusted_accuracy": 0.4
-             },
-    "class_1": {"acc_threshold": 0.8,
-             "max_incorrect": 200,
-             "overlap_limit": 99,
-             "rules_to_cover": 4,
-             "data_coverage": 99,
-             "rules_limit": 3000,
-             "penalty_factor": 2,
-             "weight_gini_impurity": 0.3,
-             "weight_split_ratio": 0.5,
-             "weight_adjusted_accuracy": 0.2
-            }
-    }
+    RF_VALUE = '1024'
+    RF_PARAM = 'numleaves_' + RF_VALUE
+    # # load config file that contains info about filter params, class 0 params and class 1 params
+    # with open(f"configs/suncorp_{RF_PARAM}_feat_united.json", 'r') as file:  
+    #     config = json.load(file)
+    
+    config = {"group": None,
+         "filename": "suncorp_numleaves_1024",
+         "folder": "export/gen2/suncorp",
+         "stamp": True,
+         "pre_filter": {"min_0_samples_class_0": 1,
+                        "max_1_samples_class_0": 10000,
+                        "min_1_samples_class_1": 1,
+                        "max_0_samples_class_1": 10000,
+                        "acc_class_0": 0.4,
+                        "acc_class_1": 0.4,
+                        "max_rules_class_0": 10000,
+                        "max_rules_class_1": 10000
+                       },
+         "class_0": {"acc_threshold": 0.7,
+                     "max_incorrect": 1000,
+                     "overlap_limit": 95,
+                     "rules_to_cover": 3,
+                     "data_coverage": 99,
+                     "rules_limit": 1000,
+                     "penalty_factor": 2,
+                     "weight_gini_impurity": 0.4,
+                     "weight_split_ratio": 0.2,
+                     "weight_adjusted_accuracy": 0.4
+                     },
+         "class_1": {"acc_threshold": 0.8,
+                     "max_incorrect": 200,
+                     "overlap_limit": 99,
+                     "rules_to_cover": 4,
+                     "data_coverage": 99,
+                     "rules_limit": 3000,
+                     "penalty_factor": 2,
+                     "weight_gini_impurity": 0.3,
+                     "weight_split_ratio": 0.5,
+                     "weight_adjusted_accuracy": 0.2
+                    }
+        }
 
     params = {'n_estimators': 300,
       'max_leaf_nodes': None,
@@ -174,10 +216,14 @@ def lf_extraction(df:pd.DataFrame,
 
     lf_extraction_mm.end_training_run()
     extracted_lf = lf_extraction.payload
+    
+    # # save locally payload
+    # with open('lf_payload.json', 'w') as file_json:
+    #     json.dump(lf_extraction.payload, file_json)
 
     return extracted_lf
 
-@step(enable_cache=False)
+@step
 def lf_model(df:pd.DataFrame,
     x_train:pd.DataFrame,
     x_test:pd.DataFrame,
@@ -213,7 +259,8 @@ def lf_model(df:pd.DataFrame,
         return base_denoiser
     
     #set admin creds
-    with open('env_config.json', 'r') as f: env_config = json.load(f)
+    with open('env_config.json', 'r') as f: 
+        env_config = json.load(f)
 
     os.environ['MLFLOW_ADMIN_USERNAME'] = env_config['MLFLOW_ADMIN_USERNAME'] 
     os.environ['MLFLOW_ADMIN_PASSWORD'] = env_config['MLFLOW_ADMIN_PASSWORD'] 
@@ -232,6 +279,12 @@ def lf_model(df:pd.DataFrame,
         logger=logger
         )
     
+    # # create lf_model from saved payload
+    # with open('lf_payload.json', 'r') as file_json:
+    #     file_json_data = json.load(file_json)
+    # lf_model = LFModel(file_json_data)
+
+    # create lf_model from passed argument
     lf_model = LFModel(extracted_lf)    
     lf_model.fit(x_train, y_train, knn_denoiser())    
     predictions = lf_model.predict(x_test)
